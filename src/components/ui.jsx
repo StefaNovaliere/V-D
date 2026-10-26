@@ -103,7 +103,7 @@ export function Interruptor({ activo, onCambio, etiqueta }) {
       className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${activo ? 'bg-positivo' : 'bg-[#cfd4da]'}`}
     >
       <span
-        className={`absolute top-0.5 h-6 w-6 rounded-full bg-white transition-transform ${
+        className={`absolute left-0 top-0.5 h-6 w-6 rounded-full bg-white transition-transform ${
           activo ? 'translate-x-[22px]' : 'translate-x-0.5'
         }`}
       />

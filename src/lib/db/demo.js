@@ -56,6 +56,14 @@ export function crearDemo() {
         creado_por: LAURA, updated_at: ahora, ...base,
       }
     }
+    if (tabla === 'gastos_fijos') {
+      return {
+        tipo: 'gasto', detalle: null, patente: null, persona_id: null,
+        frecuencia: 'mensual', es_impositivo: false, activo: true, ...base,
+      }
+    }
+    if (tabla === 'personas') return { activa: true, fecha_alta: null, ...base }
+    if (tabla === 'conceptos_deducibles') return { activo: true, orden: 0, ...base }
     return base
   }
 
