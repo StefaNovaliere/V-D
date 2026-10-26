@@ -44,3 +44,12 @@ export const FRECUENCIAS = [
 export function mesesDeFrecuencia(valor) {
   return FRECUENCIAS.find((f) => f.valor === valor)?.meses ?? 1
 }
+
+// Atajos del calendario impositivo (regalo 4). Solo completan nombre, área y
+// categoría: la fecha y el monto los carga la familia, porque cambian.
+export const ATAJOS_IMPOSITIVOS = [
+  { concepto: 'Monotributo', area: 'estudio', clave: 'monotributo' },
+  { concepto: 'Ingresos Brutos', area: 'camiones', clave: 'iibb' },
+  { concepto: 'Aportes casas particulares', area: 'casa', clave: 'aportes_cp' },
+  { concepto: 'Seguro de los camiones', area: 'camiones', clave: 'seguro' },
+]
