@@ -5,6 +5,9 @@ import { AREA } from '../lib/areas.js'
 import { fechaCorta, hoy } from '../lib/fechas.js'
 import { formatearEntrada, leerMonto, montoAEntrada } from '../lib/formato.js'
 import { Chips, Interruptor, Monto, Rotulo, Segmentado, Tarjeta } from '../components/ui.jsx'
+import Comprobantes from '../components/Comprobantes.jsx'
+import { recientesParaRepetir, usoDeCategorias } from '../lib/calculos.js'
+import { plata } from '../lib/formato.js'
 
 const OPCIONES_AREA = ['casa', 'estudio', 'camiones'].map((a) => ({ valor: a, nombre: AREA[a].nombre, area: a }))
 const OPCIONES_TIPO = [
@@ -65,6 +68,7 @@ function Formulario({ existente, tipoInicial, areaInicial, alTerminar }) {
   const movimientos = useStore((s) => s.movimientos)
   const guardarMovimiento = useStore((s) => s.guardarMovimiento)
   const borrarMovimiento = useStore((s) => s.borrarMovimiento)
+  const subirComprobantes = useStore((s) => s.subirComprobantes)
   const avisar = useStore((s) => s.avisar)
 
   const [tipo, setTipo] = useState(existente?.tipo ?? tipoInicial)
@@ -77,6 +81,8 @@ function Formulario({ existente, tipoInicial, areaInicial, alTerminar }) {
   const [nota, setNota] = useState(existente?.nota ?? '')
   const [conceptoId, setConceptoId] = useState(existente?.concepto_deducible_id ?? null)
   const [repetir, setRepetir] = useState(false)
+  const [automatico, setAutomatico] = useState(false)
+  const [archivos, setArchivos] = useState([])
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState(null)
   const [confirmarBorrado, setConfirmarBorrado] = useState(false)
@@ -89,11 +95,29 @@ function Formulario({ existente, tipoInicial, areaInicial, alTerminar }) {
     if (!editando) montoRef.current?.focus({ preventScroll: true })
   }, [editando])
 
+  // Las que más usan, primero: la que buscan suele estar arriba.
+  const uso = useMemo(() => usoDeCategorias(movimientos), [movimientos])
   const opcionesCategoria = useMemo(() => categorias
     .filter((c) => c.area === area && c.tipo === tipo && c.activa)
     // La pérdida de un camión la carga solo la sincronización con Mis Cargas.
     .filter((c) => !(c.clave === 'mis_cargas' && c.tipo === 'gasto') || c.id === categoriaId)
-    .map((c) => ({ valor: c.id, nombre: c.nombre })), [categorias, area, tipo, categoriaId])
+    .sort((a, b) => (uso.get(b.id)?.veces ?? 0) - (uso.get(a.id)?.veces ?? 0) || a.orden - b.orden)
+    .map((c) => ({ valor: c.id, nombre: c.nombre })), [categorias, area, tipo, categoriaId, uso])
+
+  const recientes = useMemo(() => (editando ? [] : recientesParaRepetir(movimientos, 4)), [movimientos, editando])
+  const montoSugerido = categoriaId && uso.get(categoriaId) ? montoAEntrada(uso.get(categoriaId).ultimoMonto) : '0'
+
+  function repetirMovimiento(m) {
+    setTipo(m.tipo)
+    setArea(m.area)
+    setCategoriaId(m.categoria_id)
+    setMontoTexto(montoAEntrada(m.monto))
+    setNota(m.nota ?? '')
+    setPersonaId(m.persona_id ?? null)
+    setPatente(m.patente ?? '')
+    setConceptoId(m.concepto_deducible_id ?? null)
+    setFecha(hoy())
+  }
 
   const categoria = categorias.find((c) => c.id === categoriaId)
   const esSueldo = categoria && ['sueldo', 'aguinaldo'].includes(categoria.clave)
@@ -138,13 +162,23 @@ function Formulario({ existente, tipoInicial, areaInicial, alTerminar }) {
     if (!fecha) return setError('Elegí la fecha.')
     setGuardando(true)
     try {
-      await guardarMovimiento({
+      const guardado = await guardarMovimiento({
         tipo, area, categoria_id: categoriaId, monto, fecha, nota,
         persona_id: esSueldo ? personaId : null,
         patente: area === 'camiones' ? patente : null,
         concepto_deducible_id: conceptoId,
         repetir: !editando && tipo === 'gasto' && repetir,
+        automatico: repetir && automatico,
       }, existente?.id)
+      if (archivos.length) {
+        try {
+          await subirComprobantes(guardado.id, archivos)
+        } catch (err) {
+          avisar(`Se guardó, pero no se pudo subir el comprobante: ${err.message}`, 'error')
+          alTerminar()
+          return
+        }
+      }
       avisar(editando ? 'Cambios guardados' : tipo === 'gasto' ? 'Gasto guardado' : 'Ingreso guardado')
       alTerminar()
     } catch (err) {
@@ -181,6 +215,25 @@ function Formulario({ existente, tipoInicial, areaInicial, alTerminar }) {
         </header>
 
         <div className="space-y-6 px-5 py-5 md:tarjeta md:p-7">
+          {recientes.length > 0 && (
+            <div>
+              <Rotulo className="mb-2">Repetir uno reciente</Rotulo>
+              <div className="-mx-5 flex gap-2 overflow-x-auto px-5 pb-1 md:mx-0 md:flex-wrap md:px-0">
+                {recientes.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => repetirMovimiento(m)}
+                    className="chip shrink-0 border-borde bg-white text-[14px] hover:bg-fondo"
+                  >
+                    <span className={`h-2 w-2 rounded-full ${AREA[m.area].punto}`} />
+                    <span className="max-w-[11rem] truncate">{m.nota || categorias.find((c) => c.id === m.categoria_id)?.nombre}</span>
+                    <span className="num text-suave">{plata(m.monto)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="space-y-3">
             <Segmentado opciones={OPCIONES_AREA} valor={area} onCambio={cambiarArea} etiqueta="Área" />
             <div className="flex justify-center">
@@ -207,7 +260,7 @@ function Formulario({ existente, tipoInicial, areaInicial, alTerminar }) {
               ref={montoRef}
               inputMode="decimal"
               autoComplete="off"
-              placeholder="0"
+              placeholder={montoSugerido}
               value={montoTexto}
               onChange={(e) => setMontoTexto(formatearEntrada(e.target.value))}
               className="num w-full max-w-[16rem] bg-transparent text-center text-[44px] font-semibold text-tinta placeholder:text-[#c5cad1] focus:outline-none"
@@ -275,16 +328,26 @@ function Formulario({ existente, tipoInicial, areaInicial, alTerminar }) {
                 <Interruptor activo={repetir} onCambio={setRepetir} etiqueta="Repetir todos los meses" />
               </div>
               {repetir && (
-                <p className="mt-1.5 text-[13px] text-suave">
-                  Queda en Vencimientos para el mes que viene; lo pagan con un toque.
-                </p>
+                <>
+                  <div className="campo mt-2 flex items-center justify-between">
+                    <span>Que se cargue solo</span>
+                    <Interruptor activo={automatico} onCambio={setAutomatico} etiqueta="Que se cargue solo" />
+                  </div>
+                  <p className="mt-1.5 text-[13px] text-suave">
+                    {automatico
+                      ? 'Cada mes se carga solo el día que vence, por este monto. Si cambia, lo corrigen en Movimientos.'
+                      : 'Queda en Vencimientos para el mes que viene; lo pagan con un toque.'}
+                  </p>
+                </>
               )}
             </div>
           )}
 
+          <Comprobantes movimientoId={existente?.id} nuevos={archivos} onNuevos={setArchivos} />
+
           {editando && (
             <p className="text-[14px] text-suave">
-              Lo cargó {nombreMiembro(miembros, existente.creado_por) ?? 'alguien del hogar'} el {fechaCorta(hoy(new Date(existente.created_at)))}.
+              {existente.creado_por ? `Lo cargó ${nombreMiembro(miembros, existente.creado_por) ?? 'alguien del hogar'}` : 'Se cargó solo'} el {fechaCorta(hoy(new Date(existente.created_at)))}.
             </p>
           )}
 

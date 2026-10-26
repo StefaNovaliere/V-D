@@ -270,3 +270,139 @@ export function agruparParaLista(movimientos) {
       return ca < cb ? 1 : ca > cb ? -1 : 0
     })
 }
+
+// ---------------------------------------------------------------------------
+// Proyección de fin de mes
+// ---------------------------------------------------------------------------
+
+/**
+ * Lo que falta pagar este mes: los gastos fijos activos que vencen hasta el
+ * último día del mes, incluidos los vencidos sin pagar y los automáticos
+ * (que igual van a salir). Los automáticos ya cargados no aparecen porque su
+ * vencimiento pasó al mes siguiente.
+ */
+export function proyeccionFinDeMes(resumenMes, gastosFijos, porCobrar, mes) {
+  const fin = ultimoDia(mes)
+  const pendientes = gastosFijos.filter((g) => g.activo && g.proximo_vencimiento <= fin && Number(g.monto) > 0)
+  const aPagar = aPesos(pendientes.reduce((t, g) => t + aCentavos(g.monto), 0))
+  const cobros = porCobrar.filter((p) => !p.cobrado_el && p.fecha_estimada && p.fecha_estimada <= fin)
+  const aCobrar = aPesos(cobros.reduce((t, p) => t + aCentavos(p.monto), 0))
+  return {
+    pendientes,
+    aPagar,
+    cobros,
+    aCobrar,
+    quedaria: aPesos(aCentavos(resumenMes.quedo) - aCentavos(aPagar)),
+    quedariaConCobros: aPesos(aCentavos(resumenMes.quedo) - aCentavos(aPagar) + aCentavos(aCobrar)),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resumen anual (gráficos)
+// ---------------------------------------------------------------------------
+
+export function resumenAnual(movimientos, anio, categorias) {
+  const meses = Array.from({ length: 12 }, (_, i) => {
+    const mes = `${anio}-${String(i + 1).padStart(2, '0')}`
+    const r = resumenDelMes(movimientos, mes, categorias)
+    return { mes, entro: r.entro, salio: r.salio, quedo: r.quedo, cantidad: r.cantidad, areas: r.areas }
+  })
+  const delAnio = movimientos.filter((m) => m.fecha.startsWith(`${anio}-`))
+  const gastos = new Map()
+  for (const m of delAnio) {
+    if (m.tipo !== 'gasto') continue
+    const g = gastos.get(m.categoria_id) ?? { categoria_id: m.categoria_id, area: m.area, centavos: 0, cantidad: 0 }
+    g.centavos += aCentavos(m.monto)
+    g.cantidad += 1
+    gastos.set(m.categoria_id, g)
+  }
+  const enQueSeFue = [...gastos.values()]
+    .map((g) => ({
+      ...g,
+      nombre: categorias.find((c) => c.id === g.categoria_id)?.nombre ?? 'Sin categoría',
+      monto: aPesos(g.centavos),
+    }))
+    .sort((a, b) => b.monto - a.monto)
+  const total = (campo) => aPesos(meses.reduce((t, m) => t + aCentavos(m[campo]), 0))
+  return { anio, meses, enQueSeFue, entro: total('entro'), salio: total('salio'), quedo: total('quedo') }
+}
+
+// ---------------------------------------------------------------------------
+// Inflación
+// ---------------------------------------------------------------------------
+
+/**
+ * Lleva un monto de un mes a "pesos de" otro mes con el IPC.
+ * `ipc` es { 'aaaa-mm': índice }. Si falta algún índice devuelve null.
+ */
+export function aPesosDe(monto, mesOrigen, mesDestino, ipc) {
+  const origen = ipc?.[mesOrigen]
+  const destino = ipc?.[mesDestino]
+  if (!origen || !destino) return null
+  return (Number(monto) * destino) / origen
+}
+
+/**
+ * Completa el IPC hasta `hasta` repitiendo la última inflación mensual
+ * conocida. El INDEC publica a mediados del mes siguiente, así que el mes en
+ * curso (y a veces el anterior) siempre es una estimación.
+ */
+export function completarIpc(ipc, hasta) {
+  const meses = Object.keys(ipc ?? {}).sort()
+  if (meses.length < 2) return { ipc: ipc ?? {}, estimados: [] }
+  const ultimo = meses[meses.length - 1]
+  const tasa = ipc[ultimo] / ipc[meses[meses.length - 2]]
+  const completo = { ...ipc }
+  const estimados = []
+  for (let m = sumarMeses(ultimo, 1); m <= hasta; m = sumarMeses(m, 1)) {
+    completo[m] = completo[sumarMeses(m, -1)] * tasa
+    estimados.push(m)
+  }
+  return { ipc: completo, estimados, ultimoPublicado: ultimo, tasaMensual: tasa - 1 }
+}
+
+/**
+ * Compara lo que quedó este mes con el anterior, en pesos de este mes.
+ * Devuelve la variación real en % (o null si no se puede calcular).
+ */
+export function variacionReal(quedoActual, quedoAnterior, mes, ipc) {
+  const anteriorHoy = aPesosDe(quedoAnterior, sumarMeses(mes, -1), mes, ipc)
+  if (anteriorHoy === null || anteriorHoy <= 0 || quedoActual < 0) return null
+  return { anteriorHoy, pct: ((quedoActual - anteriorHoy) / anteriorHoy) * 100 }
+}
+
+// ---------------------------------------------------------------------------
+// Carga rápida
+// ---------------------------------------------------------------------------
+
+/**
+ * Los últimos gastos o ingresos distintos cargados a mano, para repetirlos
+ * con un toque. Distintos = otra categoría o otra nota.
+ */
+export function recientesParaRepetir(movimientos, limite = 4) {
+  const vistos = new Set()
+  const salida = []
+  const ordenados = [...movimientos]
+    .filter((m) => m.origen === 'manual')
+    .sort((a, b) => ((a.created_at ?? a.fecha) < (b.created_at ?? b.fecha) ? 1 : -1))
+  for (const m of ordenados) {
+    const clave = `${m.categoria_id}|${(m.nota ?? '').trim().toLowerCase()}`
+    if (vistos.has(clave)) continue
+    vistos.add(clave)
+    salida.push(m)
+    if (salida.length === limite) break
+  }
+  return salida
+}
+
+/** Cuántas veces se usó cada categoría y con qué monto la última vez. */
+export function usoDeCategorias(movimientos) {
+  const uso = new Map()
+  const ordenados = [...movimientos].sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
+  for (const m of ordenados) {
+    const u = uso.get(m.categoria_id) ?? { veces: 0, ultimoMonto: Number(m.monto) }
+    u.veces += 1
+    uso.set(m.categoria_id, u)
+  }
+  return uso
+}

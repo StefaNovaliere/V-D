@@ -12,6 +12,8 @@ import Vencimientos from './pages/Vencimientos.jsx'
 import Deducibles from './pages/Deducibles.jsx'
 import Monotributo from './pages/Monotributo.jsx'
 import Ajustes from './pages/Ajustes.jsx'
+import Anual from './pages/Anual.jsx'
+import PorCobrar from './pages/PorCobrar.jsx'
 import Entrar from './pages/Entrar.jsx'
 import { db } from './lib/db/index.js'
 
@@ -75,6 +77,8 @@ export default function App() {
         <Route path="deducibles" element={<Deducibles />} />
         <Route path="monotributo" element={<Monotributo />} />
         <Route path="ajustes" element={<Ajustes />} />
+        <Route path="anual" element={<Anual />} />
+        <Route path="por-cobrar" element={<PorCobrar />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

@@ -28,6 +28,8 @@ function BarraLateral() {
         ))}
         <div className="my-3 border-t border-borde" />
         <NavLink to="/movimientos" className={enlaceLateral}>Movimientos</NavLink>
+        <NavLink to="/anual" className={enlaceLateral}>Resumen anual</NavLink>
+        <NavLink to="/por-cobrar" className={enlaceLateral}>Por cobrar</NavLink>
         <NavLink to="/sueldos" className={enlaceLateral}>Sueldos</NavLink>
         <NavLink to="/vencimientos" className={enlaceLateral}>Vencimientos</NavLink>
         <NavLink to="/deducibles" className={enlaceLateral}>Deducibles</NavLink>

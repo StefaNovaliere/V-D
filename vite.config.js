@@ -8,8 +8,11 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'script-defer',
-      includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-512-maskable.png'],
+      includeAssets: ['icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-512-maskable.png', 'sw-push.js'],
       workbox: {
+        // Los avisos al celular (public/sw-push.js) se suman al service worker.
+        importScripts: ['sw-push.js'],
+        navigateFallbackDenylist: [/^\/api\//],
         // Las fuentes vienen de Google Fonts; sin esto la app instalada se ve
         // con la tipografía del sistema cuando no hay señal.
         runtimeCaching: [
@@ -42,4 +45,14 @@ export default defineConfig({
       },
     }),
   ],
+  server: {
+    // Lo mismo que hace vercel.json en producción.
+    proxy: {
+      '/api/ipc': {
+        target: 'https://apis.datos.gob.ar',
+        changeOrigin: true,
+        rewrite: () => '/series/api/series/?ids=148.3_INIVELNAL_DICI_M_26&format=json&limit=60&sort=desc',
+      },
+    },
+  },
 })

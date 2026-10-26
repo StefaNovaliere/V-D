@@ -8,6 +8,8 @@ const PAGINA = 1000
 // tablas que no tienen `id` usan su clave primaria.
 const CLAVE_ORDEN = { configuracion: 'household_id', household_members: 'user_id' }
 
+const BUCKET = 'comprobantes'
+
 function traducirError(error) {
   const msg = error?.message || String(error)
   if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) {
@@ -19,13 +21,23 @@ function traducirError(error) {
   if (/Email not confirmed/i.test(msg)) {
     return new Error('Falta confirmar el email de esta cuenta.')
   }
+  if (/movimientos_un_pago_por_periodo/i.test(msg)) {
+    return new Error('Ese vencimiento ya figura pagado. Fijate en los movimientos del mes.')
+  }
+  if (/mime type|invalid_mime/i.test(msg)) {
+    return new Error('Solo se pueden adjuntar fotos o PDF.')
+  }
+  if (/exceeded the maximum allowed size|Payload too large/i.test(msg)) {
+    return new Error('El archivo pesa más de 10 MB.')
+  }
   if (/JWT expired|invalid JWT/i.test(msg)) {
     return new Error('La sesión venció. Volvé a entrar.')
   }
   return new Error(msg)
 }
 
-function aplicarFiltros(q, { eq = {}, gte = {}, lte = {}, no = {} }) {
+function aplicarFiltros(q, { eq = {}, gte = {}, lte = {}, no = {}, en = {} }) {
+  for (const [k, v] of Object.entries(en)) q = q.in(k, v)
   for (const [k, v] of Object.entries(eq)) q = v === null ? q.is(k, null) : q.eq(k, v)
   for (const [k, v] of Object.entries(no)) q = v === null ? q.not(k, 'is', null) : q.neq(k, v)
   for (const [k, v] of Object.entries(gte)) q = q.gte(k, v)
@@ -98,6 +110,30 @@ export function crearSupabase(url, clave) {
       const { data, error } = await cliente.rpc(nombre, args)
       if (error) throw traducirError(error)
       return data
+    },
+
+    // Archivos de comprobantes (Storage, bucket privado)
+    async subirArchivo(ruta, blob, tipo) {
+      const { error } = await cliente.storage.from(BUCKET).upload(ruta, blob, { contentType: tipo, upsert: false })
+      if (error) throw traducirError(error)
+    },
+
+    async urlArchivo(ruta) {
+      const { data, error } = await cliente.storage.from(BUCKET).createSignedUrl(ruta, 60 * 60)
+      if (error) throw traducirError(error)
+      return data.signedUrl
+    },
+
+    async bajarArchivo(ruta) {
+      const { data, error } = await cliente.storage.from(BUCKET).download(ruta)
+      if (error) throw traducirError(error)
+      return data
+    },
+
+    async borrarArchivos(rutas) {
+      if (!rutas.length) return
+      const { error } = await cliente.storage.from(BUCKET).remove(rutas)
+      if (error) throw traducirError(error)
     },
 
     async funcion(nombre, cuerpo = {}) {

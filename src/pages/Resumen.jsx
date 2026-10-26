@@ -5,9 +5,12 @@ import { useStore } from '../store/useStore.js'
 import Encabezado from '../components/Encabezado.jsx'
 import { ListaMovimientos, ListaVencimientos } from '../components/Listas.jsx'
 import { Monto, PuntoArea, Rotulo, Tarjeta } from '../components/ui.jsx'
-import { desglose, delMes, proporciones, proximosVencimientos, resumenDelMes } from '../lib/calculos.js'
+import {
+  desglose, delMes, proporciones, proximosVencimientos, proyeccionFinDeMes, resumenDelMes, variacionReal,
+} from '../lib/calculos.js'
+import { tituloMovimiento } from '../lib/textos.js'
 import { AREA, AREAS } from '../lib/areas.js'
-import { fechaLarga, hoy, mesActual, nombreMes, nombreMesCorto, sumarMeses, tituloMes } from '../lib/fechas.js'
+import { diasEntre, fechaLarga, hoy, mesActual, nombreMes, nombreMesCorto, sumarMeses, tituloMes } from '../lib/fechas.js'
 import { plata, porcentaje } from '../lib/formato.js'
 
 function useResumen() {
@@ -38,8 +41,11 @@ function BarraAreas({ resumen, campo }) {
 }
 
 function Comparacion({ mes, actual, anterior, className = '' }) {
+  const inflacion = useStore((s) => s.inflacion)
   const diferencia = actual.quedo - anterior.quedo
   if (!anterior.cantidad) return null
+  const real = inflacion ? variacionReal(actual.quedo, anterior.quedo, mes, inflacion.ipc) : null
+  const estimado = inflacion?.estimados.includes(mes)
   return (
     <div className={`text-[14px] text-suave ${className}`}>
       Este mes,{' '}
@@ -47,7 +53,82 @@ function Comparacion({ mes, actual, anterior, className = '' }) {
         {plata(diferencia, { signo: true })}
       </span>{' '}
       que en {nombreMes(sumarMeses(mes, -1))}
+      {real && (
+        <span className="block" title={estimado ? `El INDEC todavía no publicó la inflación de ${nombreMes(mes)}: se usa la del último mes publicado.` : undefined}>
+          Descontando la inflación{estimado ? ' (estimada)' : ''}:{' '}
+          <span className={`num font-semibold ${real.pct < 0 ? 'text-negativo' : 'text-positivo'}`}>
+            {real.pct > 0 ? '+' : real.pct < 0 ? '−' : ''}{Math.abs(real.pct).toFixed(1).replace('.', ',')} %
+          </span>
+        </span>
+      )}
     </div>
+  )
+}
+
+/** "Para fin de mes": lo que falta pagar y lo que les quedaría. Solo el mes en curso. */
+function Proyeccion({ mes, actual, className = '' }) {
+  const gastosFijos = useStore((s) => s.gastosFijos)
+  const porCobrar = useStore((s) => s.porCobrar)
+  if (mes !== mesActual()) return null
+  const p = proyeccionFinDeMes(actual, gastosFijos, porCobrar, mes)
+  const deben = porCobrar.reduce((t, x) => t + Number(x.monto), 0)
+  if (!p.pendientes.length && !p.cobros.length && !deben) return null
+  return (
+    <Tarjeta className={`px-5 py-4 md:px-7 ${className}`}>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-8">
+        <div>
+          <Rotulo>Para fin de mes</Rotulo>
+          {p.pendientes.length ? (
+            <p className="mt-1.5 text-[15px]">
+              Si pagan lo que falta vencer ({p.pendientes.length} {p.pendientes.length === 1 ? 'vencimiento' : 'vencimientos'},{' '}
+              <Monto valor={p.aPagar} className="font-semibold" />), les quedan{' '}
+              <Monto valor={p.quedaria} saldo className="font-semibold" />.
+            </p>
+          ) : (
+            <p className="mt-1.5 text-[15px]">No queda nada por vencer este mes.</p>
+          )}
+          {p.cobros.length > 0 && (
+            <p className="mt-1 text-[15px] text-suave">
+              Si además cobran lo que esperan para este mes (<Monto valor={p.aCobrar} />):{' '}
+              <Monto valor={p.quedariaConCobros} saldo className="font-semibold" />.
+            </p>
+          )}
+        </div>
+        {deben > 0 && (
+          <Link to="/por-cobrar" className="shrink-0 rounded-xl bg-fondo px-4 py-2.5 text-[15px] md:text-right">
+            <span className="text-suave">Les deben</span>{' '}
+            <Monto valor={deben} className="font-semibold" />
+            <span className="ml-1 text-acento">›</span>
+          </Link>
+        )}
+      </div>
+    </Tarjeta>
+  )
+}
+
+/** Los gastos fijos que se cargaron solos en la última semana, para revisarlos. */
+function SeCargaronSolos({ className = '' }) {
+  const movimientos = useStore((s) => s.movimientos)
+  const categorias = useStore((s) => s.categorias)
+  const hoyIso = hoy()
+  const solos = movimientos.filter((m) => m.origen === 'fijo' && !m.creado_por && diasEntre(hoy(new Date(m.created_at)), hoyIso) <= 7)
+  if (!solos.length) return null
+  return (
+    <Tarjeta className={`px-5 pt-4 md:px-6 ${className}`}>
+      <Rotulo>Se cargaron solos esta semana</Rotulo>
+      <ul className="divide-y divide-borde">
+        {solos.map((m) => (
+          <li key={m.id}>
+            <Link to={`/movimiento/${m.id}`} className="flex items-center gap-3 py-3">
+              <PuntoArea area={m.area} />
+              <span className="min-w-0 flex-1 truncate text-[15px]">{tituloMovimiento(m, categorias)}</span>
+              <Monto valor={m.monto} tipo="gasto" className="text-[15px]" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <p className="pb-4 text-[13px] text-suave">Si algún monto cambió este mes, tocalo para corregirlo.</p>
+    </Tarjeta>
   )
 }
 
@@ -93,6 +174,8 @@ function ResumenCelular({ mes, actual, anterior, movsMes, vencimientos }) {
         <Comparacion mes={mes} actual={actual} anterior={anterior} className="mt-3 border-t border-borde pt-3" />
       </Tarjeta>
 
+      <Proyeccion mes={mes} actual={actual} />
+
       <Tarjeta className="px-5">
         <ul className="divide-y divide-borde">
           {AREAS.map((area) => {
@@ -112,6 +195,8 @@ function ResumenCelular({ mes, actual, anterior, movsMes, vencimientos }) {
           })}
         </ul>
       </Tarjeta>
+
+      <SeCargaronSolos />
 
       {vencimientos[0] && (
         <Tarjeta className="px-5 py-4">
@@ -229,9 +314,13 @@ function ResumenComputadora({ mes, actual, anterior, movsMes, vencimientos }) {
         </div>
       </Tarjeta>
 
+      <Proyeccion mes={mes} actual={actual} />
+
       <div className="grid grid-cols-3 gap-6">
         {AREAS.map((area) => <TarjetaArea key={area} area={area} r={actual.areas[area]} />)}
       </div>
+
+      <SeCargaronSolos />
 
       <div className="grid grid-cols-[1.75fr_1fr] gap-6">
         <Tarjeta className="px-6 pb-3 pt-5">

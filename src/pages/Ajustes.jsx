@@ -6,6 +6,7 @@ import { db } from '../lib/db/index.js'
 import Encabezado from '../components/Encabezado.jsx'
 import { Interruptor, Rotulo, Tarjeta } from '../components/ui.jsx'
 import { BotonCarpetaContador } from './Movimientos.jsx'
+import { activarAvisos, avisoDePrueba, desactivarAvisos, estadoSoporte, suscripcionActual } from '../lib/avisos.js'
 
 function Seccion({ id, titulo, children }) {
   return (
@@ -88,6 +89,68 @@ function MisCargas() {
   )
 }
 
+function Avisos() {
+  const configuracion = useStore((s) => s.configuracion)
+  const guardarConfiguracion = useStore((s) => s.guardarConfiguracion)
+  const avisar = useStore((s) => s.avisar)
+  const [activos, setActivos] = useState(null)
+  const [ocupado, setOcupado] = useState(false)
+  const soporte = estadoSoporte()
+
+  useEffect(() => {
+    let vigente = true
+    suscripcionActual().then((s) => vigente && setActivos(Boolean(s))).catch(() => vigente && setActivos(false))
+    return () => { vigente = false }
+  }, [])
+
+  async function cambiar(valor) {
+    setOcupado(true)
+    try {
+      if (valor) await activarAvisos()
+      else await desactivarAvisos()
+      setActivos(valor)
+      avisar(valor ? 'Avisos activados en este dispositivo' : 'Avisos desactivados')
+    } catch (e) {
+      avisar(e.message, 'error')
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  return (
+    <Seccion id="avisos" titulo="Avisos al celular">
+      <p className="text-[15px] text-suave">
+        A la mañana avisa lo que vence en los próximos días y lo que se cargó solo. Se activa en cada celular o computadora.
+      </p>
+      {soporte.ok ? (
+        <div className="mt-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-borde px-3.5 py-3">
+            <span className="text-[15px]">Avisos en este dispositivo</span>
+            <Interruptor activo={Boolean(activos)} onCambio={(v) => !ocupado && cambiar(v)} etiqueta="Avisos en este dispositivo" />
+          </div>
+          {activos && (
+            <button type="button" className="boton-fantasma px-2 py-1 text-[14px]" onClick={() => avisoDePrueba().catch((e) => avisar(e.message, 'error'))}>
+              Ver cómo se ve un aviso
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-xl bg-fondo px-4 py-3 text-[14px] text-suave">{soporte.motivo}</p>
+      )}
+      <label className="mt-4 flex items-center justify-between gap-3 text-[15px]">
+        <span>Avisar con anticipación de</span>
+        <select
+          className="campo w-auto py-2"
+          value={configuracion?.aviso_dias ?? 2}
+          onChange={(e) => guardarConfiguracion({ aviso_dias: Number(e.target.value) }).catch((err) => avisar(err.message, 'error'))}
+        >
+          {[0, 1, 2, 3, 5, 7].map((d) => <option key={d} value={d}>{d === 0 ? 'solo el mismo día' : `${d} ${d === 1 ? 'día' : 'días'}`}</option>)}
+        </select>
+      </label>
+    </Seccion>
+  )
+}
+
 function Conceptos() {
   const conceptos = useStore((s) => s.conceptos)
   const guardarConcepto = useStore((s) => s.guardarConcepto)
@@ -163,7 +226,7 @@ export default function Ajustes() {
         <div className="space-y-4 md:space-y-6">
           <Tarjeta className="px-5 md:hidden">
             <ul className="divide-y divide-borde">
-              {[['/sueldos', 'Sueldos'], ['/deducibles', 'Deducibles de Ganancias'], ['/monotributo', 'Control del monotributo'], ['/area/casa', 'Casa'], ['/area/estudio', 'Estudio'], ['/area/camiones', 'Camiones']].map(([to, nombre]) => (
+              {[['/por-cobrar', 'Plata por cobrar'], ['/anual', 'Resumen anual'], ['/sueldos', 'Sueldos'], ['/deducibles', 'Deducibles de Ganancias'], ['/monotributo', 'Control del monotributo'], ['/area/casa', 'Casa'], ['/area/estudio', 'Estudio'], ['/area/camiones', 'Camiones']].map(([to, nombre]) => (
                 <li key={to}>
                   <Link to={to} className="flex items-center justify-between py-3.5 text-[16px]">
                     {nombre} <ChevronRight size={18} className="text-suave" />
@@ -181,6 +244,7 @@ export default function Ajustes() {
           </Seccion>
 
           <MisCargas />
+          <Avisos />
         </div>
         <div className="space-y-4 md:space-y-6">
           <Seccion titulo={hogar?.nombre ?? 'Hogar'}>

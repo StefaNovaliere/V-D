@@ -8,6 +8,7 @@ import { Monto, Tarjeta } from '../components/ui.jsx'
 import { delMes, resumenDelMes } from '../lib/calculos.js'
 import { nombreMes } from '../lib/fechas.js'
 import { descargarCarpetaContador } from '../lib/carpetaContador.js'
+import { db } from '../lib/db/index.js'
 
 export function BotonCarpetaContador({ className = '' }) {
   const mes = useStore((s) => s.mes)
@@ -17,14 +18,17 @@ export function BotonCarpetaContador({ className = '' }) {
     setArmando(true)
     try {
       const s = useStore.getState()
-      await descargarCarpetaContador({
+      const movimientos = delMes(s.movimientos, mes)
+      const comprobantes = await s.comprobantesDe(movimientos.map((m) => m.id))
+      const r = await descargarCarpetaContador({
         mes,
-        movimientos: delMes(s.movimientos, mes),
+        movimientos,
         categorias: s.categorias,
         conceptos: s.conceptos,
         personas: s.personas,
         miembros: s.miembros,
-      })
+      }, comprobantes, (ruta) => db.bajarArchivo(ruta))
+      if (r.faltaron) avisar(`No se pudieron bajar ${r.faltaron} comprobantes; el resto está en la carpeta.`, 'error')
     } catch (e) {
       avisar(`No se pudo armar el Excel: ${e.message}`, 'error')
     } finally {

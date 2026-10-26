@@ -1,3 +1,12 @@
 {
-  "rewrites": [{ "source": "/((?!assets/|icons/).*)", "destination": "/index.html" }]
+  "rewrites": [
+    {
+      "source": "/api/ipc",
+      "destination": "https://apis.datos.gob.ar/series/api/series/?ids=148.3_INIVELNAL_DICI_M_26&format=json&limit=60&sort=desc"
+    },
+    {
+      "source": "/((?!assets/|icons/|api/).*)",
+      "destination": "/index.html"
+    }
+  ]
 }

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { Paperclip } from 'lucide-react'
 import { useStore, nombreMiembro } from '../store/useStore.js'
 import { agruparParaLista, textoDias } from '../lib/calculos.js'
 import { AREA } from '../lib/areas.js'
@@ -11,8 +12,8 @@ function subtituloMovimiento(mov, miembros, personas) {
   const persona = personas.find((p) => p.id === mov.persona_id)
   if (persona) partesTexto.push(persona.nombre)
   if (mov.patente) partesTexto.push(mov.patente)
-  if (mov.origen === 'fijo') partesTexto.push('Gasto fijo')
   const quien = nombreMiembro(miembros, mov.creado_por)
+  if (mov.origen === 'fijo') partesTexto.push(quien ? 'Gasto fijo' : 'Se cargó solo')
   if (quien) partesTexto.push(`Cargó ${quien}`)
   return partesTexto.join(' · ')
 }
@@ -25,6 +26,7 @@ export function ListaMovimientos({ movimientos, limite, porDia = false, vacio = 
   const categorias = useStore((s) => s.categorias)
   const miembros = useStore((s) => s.miembros)
   const personas = useStore((s) => s.personas)
+  const comprobantes = useStore((s) => s.comprobantes)
   const filas = agruparParaLista(movimientos).slice(0, limite)
   if (!filas.length) return <Vacio>{vacio}</Vacio>
 
@@ -52,7 +54,10 @@ export function ListaMovimientos({ movimientos, limite, porDia = false, vacio = 
             >
               <PuntoArea area={f.mov.area} className="md:hidden" />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[16px]">{tituloMovimiento(f.mov, categorias)}</div>
+                <div className="flex items-center gap-1.5 text-[16px]">
+                  <span className="truncate">{tituloMovimiento(f.mov, categorias)}</span>
+                  {comprobantes[f.mov.id] > 0 && <Paperclip size={14} className="shrink-0 text-suave" aria-label="Tiene comprobante" />}
+                </div>
                 <div className="truncate text-[14px] text-suave">{subtituloMovimiento(f.mov, miembros, personas)}</div>
               </div>
               <span className="hidden md:block"><EtiquetaArea area={f.mov.area} /></span>
@@ -96,6 +101,7 @@ export function ListaVencimientos({ vencimientos, onElegir, mostrarDias = 7 }) {
             <div className="min-w-0 flex-1">
               <div className="truncate text-[16px]">
                 {v.concepto}{v.patente ? ` · ${v.patente}` : ''}
+                {v.automatico && <span className="ml-2 rounded-full bg-fondo px-2 py-0.5 text-[12px] text-suave">se carga solo</span>}
               </div>
               <div className="truncate text-[14px] text-suave">
                 {AREA[v.area].nombre} · <span className="num">{v.monto ? <Monto valor={v.monto} /> : 'sin monto'}</span>
