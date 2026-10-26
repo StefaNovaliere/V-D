@@ -12,6 +12,8 @@ import Vencimientos from './pages/Vencimientos.jsx'
 import Deducibles from './pages/Deducibles.jsx'
 import Monotributo from './pages/Monotributo.jsx'
 import Ajustes from './pages/Ajustes.jsx'
+import Entrar from './pages/Entrar.jsx'
+import { db } from './lib/db/index.js'
 
 function Pantalla({ titulo, children }) {
   return (
@@ -28,10 +30,17 @@ export default function App() {
   const estado = useStore((s) => s.estado)
   const error = useStore((s) => s.error)
   const iniciar = useStore((s) => s.iniciar)
+  const salir = useStore((s) => s.salir)
 
   useEffect(() => {
     iniciar()
   }, [iniciar])
+
+  // Si la sesión se cierra o vence (por ejemplo, desde otra pestaña),
+  // volver a la pantalla de entrada.
+  useEffect(() => db.alCambiarSesion((sesion) => {
+    if (!sesion && useStore.getState().usuario) useStore.setState({ estado: 'sin_sesion', usuario: null })
+  }), [])
 
   if (estado === 'cargando') return <Cargando />
   if (estado === 'error') {
@@ -39,6 +48,16 @@ export default function App() {
       <Pantalla titulo="No se pudo abrir la app">
         <p>{error}</p>
         <button type="button" className="boton-primario mt-5" onClick={() => location.reload()}>Probar de nuevo</button>
+      </Pantalla>
+    )
+  }
+
+  if (estado === 'sin_sesion') return <Entrar />
+  if (estado === 'sin_hogar') {
+    return (
+      <Pantalla titulo="Tu cuenta todavía no está en un hogar">
+        <p>Pedile a quien administra la app que te sume al hogar de la familia.</p>
+        <button type="button" className="boton-secundario mt-5" onClick={salir}>Salir</button>
       </Pantalla>
     )
   }

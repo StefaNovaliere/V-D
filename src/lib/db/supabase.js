@@ -4,6 +4,10 @@ import { createClient } from '@supabase/supabase-js'
 // movimientos de la familia puede pasarse, así que se pide por páginas.
 const PAGINA = 1000
 
+// Columna única para ordenar y paginar sin que las páginas se pisen. Las
+// tablas que no tienen `id` usan su clave primaria.
+const CLAVE_ORDEN = { configuracion: 'household_id', household_members: 'user_id' }
+
 function traducirError(error) {
   const msg = error?.message || String(error)
   if (/Failed to fetch|NetworkError|Load failed/i.test(msg)) {
@@ -65,8 +69,7 @@ export function crearSupabase(url, clave) {
       for (let desde = 0; ; desde += PAGINA) {
         let q = aplicarFiltros(cliente.from(tabla).select('*'), opciones)
         if (orden) q = q.order(orden, { ascending: asc })
-        // Orden estable para que las páginas no se pisen.
-        if (tabla !== 'configuracion') q = q.order('id', { ascending: true })
+        q = q.order(CLAVE_ORDEN[tabla] ?? 'id', { ascending: true })
         const { data, error } = await q.range(desde, desde + PAGINA - 1)
         if (error) throw traducirError(error)
         filas.push(...data)
