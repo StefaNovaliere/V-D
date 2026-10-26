@@ -93,9 +93,12 @@ SELECT pg_temp.comprobar((SELECT count(*) FROM public.por_cobrar) = 0, 'B no ve 
 SELECT pg_temp.comprobar((SELECT count(*) FROM public.comprobantes) = 0, 'B no ve los comprobantes de A');
 SELECT pg_temp.comprobar((SELECT count(*) FROM storage.objects) = 0, 'B no ve los archivos de A');
 SELECT pg_temp.comprobar((SELECT count(*) FROM public.push_suscripciones) = 0, 'B no ve los avisos de A');
+-- En Supabase, además, Storage no deja borrar archivos con SQL (solo por su
+-- API): si salta ese bloqueo, igual cuenta como "no pudo borrar".
 DO $$ DECLARE n int; BEGIN
   DELETE FROM storage.objects; GET DIAGNOSTICS n = ROW_COUNT;
   PERFORM pg_temp.comprobar(n = 0, 'B no puede borrar archivos de A');
+EXCEPTION WHEN insufficient_privilege THEN NULL;
 END $$;
 
 RESET ROLE;
