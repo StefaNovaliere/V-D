@@ -35,6 +35,10 @@ ejemplo" la deja como al principio.
 
 ## Base de datos
 
+La lista completa de pasos manuales, en orden, está en
+[`docs/PUESTA_EN_MARCHA.md`](docs/PUESTA_EN_MARCHA.md). Desactivá "Allow new users to
+sign up" en Authentication: las cuentas se crean a mano.
+
 Los SQL están en `supabase/` y se corren **en orden** en el SQL Editor. Todos
 se pueden volver a correr sin romper nada.
 
