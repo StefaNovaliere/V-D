@@ -64,3 +64,57 @@
       inicio".
 - [ ] Cargar juntos las personas con sueldo, los gastos fijos con sus
       vencimientos y, si corresponde, la categoría y el tope del monotributo.
+
+---
+
+# Mejoras (segunda tanda)
+
+Gastos fijos automáticos, avisos al celular, comprobantes, resumen anual,
+inflación, proyección de fin de mes, plata por cobrar y carga rápida. Lo que
+hay que hacer a mano, en orden:
+
+## A. Supabase de esta app
+
+- [ ] SQL Editor: correr `supabase/06_mejoras.sql`. Crea el bucket
+      `comprobantes` de Storage con sus permisos.
+- [ ] Opcional: correr `supabase/tests/mejoras_test.sql`; tiene que mostrar
+      `MEJORAS OK`.
+- [ ] Redesplegar `sincronizar-mis-cargas` (cambió: ahora también trae lo que
+      deben los dadores). En el editor: abrir la función, pegar el código
+      nuevo de `supabase/functions/sincronizar-mis-cargas/index.ts`, Deploy.
+
+## B. Avisos al celular
+
+- [ ] Generar las claves, en cualquier compu con Node:
+      `npx web-push generate-vapid-keys`. Da una Public Key y una Private Key.
+- [ ] Inventar un secreto largo para el cron (por ejemplo, con un generador de
+      contraseñas).
+- [ ] Edge Functions → Secrets, cargar:
+      `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+      `VAPID_SUBJECT` (`mailto:` + tu email) y `CRON_SECRET` (el secreto).
+- [ ] Crear la función `recordatorios-diarios` (Via Editor) con el código de
+      `supabase/functions/recordatorios-diarios/index.ts` y **desactivar**
+      "Enforce JWT verification" (la protege el secreto del cron).
+- [ ] Vercel → Environment Variables: `VITE_VAPID_PUBLIC_KEY` = la Public Key
+      (la misma de arriba). Redeploy.
+- [ ] En `supabase/07_cron.sql` reemplazar los dos `CAMBIAR` (URL del proyecto
+      y el secreto) y correrlo en el SQL Editor. Comprobar con
+      `SELECT jobname, schedule FROM cron.job;` que hay dos tareas.
+- [ ] En cada celular: Ajustes → "Avisos al celular" → activar. En iPhone,
+      primero instalar la app en la pantalla de inicio y abrirla desde el ícono.
+
+## C. Mis Cargas (lo que deben los dadores)
+
+- [ ] Pasarle `docs/mis-cargas/PROMPT_2_POR_COBRAR.md` a la sesión de Mis
+      Cargas y revisar lo que haga.
+- [ ] En el Supabase de Mis Cargas: correr `supabase/integracion_app_familiar_2.sql`.
+- [ ] Redesplegar `ingreso-mensual` (sigue **sin** verificación de JWT).
+- [ ] En la app familiar: Camiones → Actualizar. En "Por cobrar" aparece lo que
+      deben los dadores.
+
+## D. Nada que configurar
+
+Resumen anual, proyección de fin de mes, carga rápida y plata por cobrar del
+estudio andan solos. La comparación con inflación usa el IPC del INDEC a
+través de `/api/ipc` (está en `vercel.json`); si la API no responde, esa línea
+simplemente no aparece.

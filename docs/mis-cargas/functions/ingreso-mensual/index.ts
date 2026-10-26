@@ -1,28 +1,45 @@
-// PARA MIS CARGAS: copiar a supabase/functions/ingreso-mensual/index.ts de
-// ese repositorio.
-//
+// supabase/functions/ingreso-mensual/index.ts
 // Endpoint de solo lectura para la app "Cuentas de la familia". Devuelve,
 // por mes y por patente, el saldo del dueño. Se autentica con un token de
-// integración (tabla tokens_integracion), no con la sesión de Supabase.
+// integración (tabla tokens_integracion, ver supabase/integracion_app_familiar.sql),
+// no con la sesión de Supabase.
 //
 //   GET ?desde=2026-08&hasta=2026-10
 //   Authorization: Bearer mc_xxxxxxxx
 //
 //   200 { "meses": [ { "mes": "2026-10", "patentes": [
 //           { "patente": "AE 412 KT", "saldo_dueno": 1120000, "viajes": 9, "viajes_sin_saldo": 0 } ] } ] }
+//   (también trae "por_cobrar": [ { "dador": "Cargill", "monto": 1450000, "viajes": 3 } ],
+//    lo que los dadores todavía no liquidaron, sin importar el mes)
 //
-// Deploy SIN verificación de JWT (el token es propio):
+//   401 token faltante, inválido o revocado
+//   400 desde/hasta que no son aaaa-mm
+//
+// La otra app depende de este formato: no cambiarlo sin avisar.
+//
+// IMPORTANTE: desplegar con --no-verify-jwt porque el token es propio,
+// no un JWT de Supabase:
 //   supabase functions deploy ingreso-mensual --no-verify-jwt
-// SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY ya vienen configurados.
+// (SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY ya vienen configurados)
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const MES = /^\d{4}-(0[1-9]|1[0-2])$/;
 
+// La otra app puede llamar desde el navegador. Sin estos encabezados el
+// navegador corta el pedido antes de mandarlo (el header Authorization
+// obliga a un preflight OPTIONS). No hay cookies de por medio: la
+// autorización es el token, así que se puede abrir a cualquier origen.
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "authorization, content-type",
+};
+
 const responder = (cuerpo: unknown, status = 200) =>
   new Response(JSON.stringify(cuerpo), {
     status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "no-store" },
   });
 
 async function sha256(texto: string) {
@@ -31,6 +48,7 @@ async function sha256(texto: string) {
 }
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   if (req.method !== "GET") return responder({ error: "Solo GET" }, 405);
 
   const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
@@ -51,6 +69,7 @@ Deno.serve(async (req) => {
     .eq("token_hash", await sha256(token))
     .is("revocado_at", null)
     .maybeSingle();
+
   // Misma respuesta para token inexistente o revocado: no dar pistas.
   if (!fila) return responder({ error: "Token inválido" }, 401);
 
@@ -59,7 +78,10 @@ Deno.serve(async (req) => {
   const { data, error } = await admin.rpc("saldo_mensual_por_patente", {
     p_user: fila.user_id, p_desde: desde, p_hasta: hasta,
   });
-  if (error) return responder({ error: "No se pudo calcular" }, 500);
+  if (error) {
+    console.error("ingreso-mensual error:", error);
+    return responder({ error: "No se pudo calcular" }, 500);
+  }
 
   const porMes = new Map<string, unknown[]>();
   for (const r of data ?? []) {
@@ -71,5 +93,19 @@ Deno.serve(async (req) => {
       viajes_sin_saldo: r.viajes_sin_saldo,
     });
   }
-  return responder({ meses: [...porMes].map(([mes, patentes]) => ({ mes, patentes })) });
+
+  // Lo que los dadores todavía deben (viajes sin liquidar, de cualquier mes).
+  // Si el SQL de esta parte todavía no se corrió, se responde sin este dato:
+  // la otra app lo tolera.
+  const { data: deudas, error: errorDeudas } = await admin.rpc("por_cobrar_por_dador", { p_user: fila.user_id });
+  if (errorDeudas) console.error("ingreso-mensual por_cobrar:", errorDeudas);
+
+  return responder({
+    meses: [...porMes].map(([mes, patentes]) => ({ mes, patentes })),
+    ...(errorDeudas ? {} : {
+      por_cobrar: (deudas ?? []).map((d: { dador: string; monto: number; viajes: number }) => ({
+        dador: d.dador, monto: Number(d.monto), viajes: d.viajes,
+      })),
+    }),
+  });
 });

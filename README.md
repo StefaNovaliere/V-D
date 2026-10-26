@@ -26,7 +26,8 @@ npm run dev
 | Variable | Valor |
 |---|---|
 | `VITE_SUPABASE_URL` | URL del proyecto de Supabase **de esta app** (no el de Mis Cargas) |
-| `VITE_SUPABASE_ANON_KEY` | anon key de ese proyecto |
+| `VITE_SUPABASE_ANON_KEY` | anon (o publishable) key de ese proyecto |
+| `VITE_VAPID_PUBLIC_KEY` | clave pública para los avisos al celular (opcional; ver `docs/PUESTA_EN_MARCHA.md`) |
 
 **Modo demostración**: si faltan las dos variables, la app arranca sin login
 y con los datos del boceto aprobado, guardados solo en el navegador. Sirve
@@ -54,7 +55,13 @@ se pueden volver a correr sin romper nada.
    en Authentication → Users → Add user (con "Auto Confirm User"). Antes de
    correrlo, cambiá los emails y los nombres.
 
-Para comprobar las políticas: `supabase/tests/rls_test.sql`. Arma dos
+6. `06_mejoras.sql`: gastos fijos automáticos, plata por cobrar,
+   comprobantes (tabla y bucket de Storage) y avisos.
+7. `07_cron.sql`: las dos tareas diarias (cargar los gastos fijos automáticos
+   y mandar los avisos). Antes hay que reemplazar los `CAMBIAR`.
+
+Para comprobar las políticas: `supabase/tests/rls_test.sql` y
+`supabase/tests/mejoras_test.sql` (este muestra `MEJORAS OK`). Arma dos
 hogares de prueba, verifica que ninguno ve ni toca lo del otro y termina en
 `ROLLBACK`, así que no deja nada guardado. Si sale bien, muestra `RLS OK`.
 (`tests/stub_local.sql` es solo para probar en un Postgres fuera de Supabase.)
@@ -80,6 +87,17 @@ La explicación completa está en [`docs/INTEGRACION_MIS_CARGAS.md`](docs/INTEGR
 - Después, en esta app: Ajustes → Mis Cargas → pegar la dirección del
   endpoint y el token.
 
+## Edge Functions
+
+| Función | Proyecto | JWT | Para qué |
+|---|---|---|---|
+| `sincronizar-mis-cargas` | este | verificado | trae el ingreso por patente y lo que deben los dadores |
+| `recordatorios-diarios` | este | **sin** verificar (secreto `CRON_SECRET`) | carga los gastos fijos automáticos y manda los avisos |
+| `ingreso-mensual` | Mis Cargas | **sin** verificar (token propio) | lo que consulta la sincronización |
+
+Secrets de `recordatorios-diarios`: `CRON_SECRET`, `VAPID_PUBLIC_KEY`,
+`VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`.
+
 ## Deploy en Vercel
 
 - Framework: Vite. Build: `npm run build`. Salida: `dist`.
@@ -87,7 +105,10 @@ La explicación completa está en [`docs/INTEGRACION_MIS_CARGAS.md`](docs/INTEGR
   Variables.
 - `vercel.json` manda todas las rutas a `index.html` para que funcionen los
   links directos (`/vencimientos`, `/area/camiones`).
-- La PWA se actualiza sola (`registerType: 'autoUpdate'`).
+- `vercel.json` también reenvía `/api/ipc` a la API de series del INDEC
+  (datos.gob.ar), para la comparación con inflación.
+- La PWA se actualiza sola (`registerType: 'autoUpdate'`). Los avisos se
+  suman al service worker con `public/sw-push.js`.
 
 ## Qué hay
 
@@ -110,7 +131,7 @@ La explicación completa está en [`docs/INTEGRACION_MIS_CARGAS.md`](docs/INTEGR
 
 **Regalos**
 1. Carpeta para el contador: Excel del mes con un resumen y una hoja por
-   área. No incluye fotos de comprobantes, que son un opcional.
+   área, y las fotos de los comprobantes si las hay (en un ZIP).
 2. Deducibles de Ganancias: conceptos configurables y resumen anual por
    concepto, con la aclaración de que lo confirma el contador.
 3. Control del tope del monotributo: facturado en 12 meses contra el tope
@@ -118,10 +139,26 @@ La explicación completa está en [`docs/INTEGRACION_MIS_CARGAS.md`](docs/INTEGR
 4. Calendario de vencimientos impositivos: en Vencimientos, el filtro
    "Impositivos", con fechas que carga la familia.
 
+**Mejoras (segunda tanda)**
+- Gastos fijos que se cargan solos el día que vencen (sueldos, seguro…), con
+  el aviso "Se cargaron solos" para revisar el monto. No se pueden pagar dos
+  veces: la base guarda qué vencimiento cubre cada pago.
+- Avisos al celular a la mañana: lo que vence en los próximos días y lo que
+  se cargó solo.
+- Fotos o PDF de comprobantes en cada movimiento (se achican antes de subir);
+  la carpeta para el contador baja un ZIP con el Excel y las fotos.
+- Resumen anual: cuánto quedó cada mes, en qué se fue la plata y la tabla mes
+  por mes, con la opción de verlo en pesos de hoy.
+- Comparación con el mes anterior descontando la inflación (IPC del INDEC).
+- Proyección de fin de mes: lo que falta vencer y lo que les quedaría.
+- Plata por cobrar: honorarios pendientes del estudio (al cobrarlos se cargan
+  como ingreso) y lo que deben los dadores, desde Mis Cargas.
+- Carga rápida: repetir uno reciente, categorías ordenadas por uso y el último
+  monto sugerido.
+
 **Interpretaciones del alcance**
-- **"Repetir todos los meses"** deja un vencimiento mensual que se paga con
-  un toque; no carga nada solo, porque eso es el opcional "gastos fijos
-  automáticos".
+- **"Repetir todos los meses"** deja un vencimiento mensual; con "Que se
+  cargue solo" activado, además se carga solo cada mes.
 - **El chip "+ Nueva" del boceto** no está, porque las categorías editables
   son un opcional.
 - **La pantalla de Movimientos** lista los movimientos del mes sin filtros,
