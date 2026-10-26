@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-fondo text-tinta font-sans antialiased;
+  }
+  /* Los números en columnas quedan alineados: todas las cifras miden igual. */
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+  input, select, textarea, button {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .tarjeta {
+    @apply bg-white border border-borde rounded-2xl;
+  }
+  .rotulo {
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-suave;
+  }
+  .campo {
+    @apply w-full rounded-xl border border-borde bg-white px-3.5 py-3 text-[16px] text-tinta
+      placeholder:text-suave/70 focus:outline-none focus:border-acento focus:ring-2 focus:ring-acento/15;
+  }
+  .boton {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-semibold
+      transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .boton-primario {
+    @apply boton bg-acento text-white hover:bg-acento-oscuro;
+  }
+  .boton-secundario {
+    @apply boton bg-white text-tinta border border-borde hover:bg-fondo;
+  }
+  .boton-fantasma {
+    @apply boton text-acento hover:bg-acento-claro;
+  }
+  .boton-peligro {
+    @apply boton bg-white text-negativo border border-borde hover:bg-red-50;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[15px] transition-colors;
+  }
+}
+
+/* Espacio para la barra inferior del celular y el "notch" */
+.pb-barra {
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
