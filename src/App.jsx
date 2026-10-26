@@ -4,6 +4,14 @@ import { useStore } from './store/useStore.js'
 import Marco from './components/Marco.jsx'
 import { Cargando } from './components/ui.jsx'
 import Resumen from './pages/Resumen.jsx'
+import Area from './pages/Area.jsx'
+import Movimientos from './pages/Movimientos.jsx'
+import NuevoMovimiento from './pages/NuevoMovimiento.jsx'
+import Sueldos from './pages/Sueldos.jsx'
+import Vencimientos from './pages/Vencimientos.jsx'
+import Deducibles from './pages/Deducibles.jsx'
+import Monotributo from './pages/Monotributo.jsx'
+import Ajustes from './pages/Ajustes.jsx'
 
 function Pantalla({ titulo, children }) {
   return (
@@ -39,6 +47,15 @@ export default function App() {
     <Routes>
       <Route element={<Marco />}>
         <Route index element={<Resumen />} />
+        <Route path="area/:area" element={<Area />} />
+        <Route path="movimientos" element={<Movimientos />} />
+        <Route path="nuevo" element={<NuevoMovimiento />} />
+        <Route path="movimiento/:id" element={<NuevoMovimiento />} />
+        <Route path="sueldos" element={<Sueldos />} />
+        <Route path="vencimientos" element={<Vencimientos />} />
+        <Route path="deducibles" element={<Deducibles />} />
+        <Route path="monotributo" element={<Monotributo />} />
+        <Route path="ajustes" element={<Ajustes />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
