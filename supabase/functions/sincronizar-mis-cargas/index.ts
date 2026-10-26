@@ -45,7 +45,8 @@ const ultimoDia = (mes: string) => {
 const normalizarPatente = (p: string) => p.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 type Patente = { patente: string; saldo_dueno: number; viajes?: number; viajes_sin_saldo?: number };
-type RespuestaMisCargas = { meses: { mes: string; patentes: Patente[] }[] };
+type Dador = { dador: string; monto: number; viajes?: number };
+type RespuestaMisCargas = { meses: { mes: string; patentes: Patente[] }[]; por_cobrar?: Dador[] };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -168,8 +169,35 @@ Deno.serve(async (req) => {
   const sobran = (previos ?? []).filter((m) => !refs.has(m.ref_externa)).map((m) => m.id);
   if (sobran.length) await admin.from("movimientos").delete().in("id", sobran);
 
+  // 8. Lo que deben los dadores (si esta versión de Mis Cargas lo manda).
+  //    Es una foto del momento: se reemplaza entera en cada sincronización.
+  let dadores = 0;
+  if (Array.isArray(datos.por_cobrar)) {
+    const filasDeuda = datos.por_cobrar
+      .filter((d) => d?.dador && Number(d.monto) > 0)
+      .map((d) => ({
+        household_id: hogar,
+        area: "camiones",
+        quien: String(d.dador).trim(),
+        detalle: d.viajes ? `${d.viajes} ${d.viajes === 1 ? "viaje" : "viajes"} sin liquidar` : null,
+        monto: Math.round(Number(d.monto) * 100) / 100,
+        origen: "mis_cargas",
+        ref_externa: `mis_cargas:dador:${String(d.dador).trim().toLowerCase()}`,
+      }));
+    if (filasDeuda.length) {
+      const { error } = await admin.from("por_cobrar").upsert(filasDeuda, { onConflict: "household_id,ref_externa" });
+      if (error) console.error("por_cobrar", error.message);
+    }
+    const vigentes = new Set(filasDeuda.map((f) => f.ref_externa));
+    const { data: previas } = await admin
+      .from("por_cobrar").select("id, ref_externa").eq("household_id", hogar).eq("origen", "mis_cargas");
+    const viejas = (previas ?? []).filter((p) => !vigentes.has(p.ref_externa)).map((p) => p.id);
+    if (viejas.length) await admin.from("por_cobrar").delete().in("id", viejas);
+    dadores = filasDeuda.length;
+  }
+
   const meses = datos.meses.filter((m) => MES.test(m.mes) && m.mes >= desde && m.mes <= hasta).length;
   const detalle = `${filas.length} camión-mes en ${meses} ${meses === 1 ? "mes" : "meses"}`;
   await registrar(true, detalle);
-  return responder({ ok: true, actualizados: filas.length, borrados: sobran.length, detalle });
+  return responder({ ok: true, actualizados: filas.length, borrados: sobran.length, dadores, detalle });
 });
