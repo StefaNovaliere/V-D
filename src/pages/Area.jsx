@@ -144,12 +144,15 @@ export default function Area() {
   const movimientos = useStore((s) => s.movimientos)
   const categorias = useStore((s) => s.categorias)
   const personas = useStore((s) => s.personas)
+  const porCobrar = useStore((s) => s.porCobrar)
   const r = useMemo(() => resumenDelMes(movimientos, mes, categorias).areas[area], [movimientos, mes, categorias, area])
   if (!AREA[area]) return <Navigate to="/" replace />
 
   const movsArea = delMes(movimientos, mes).filter((m) => m.area === area)
   const esCamiones = area === 'camiones'
   const tienePersonas = personas.some((p) => p.area === area && p.activa)
+  const deudas = porCobrar.filter((p) => p.area === area)
+  const deben = deudas.reduce((t, p) => t + Number(p.monto), 0)
 
   const quedo = (
     <Tarjeta className="flex items-center justify-between gap-3 px-5 py-4 md:px-6">
@@ -177,6 +180,17 @@ export default function Area() {
           )}
           <GastosFijos area={area} mes={mes} movimientos={movimientos} />
           {esCamiones ? quedo : <Desglose r={r} />}
+          {deudas.length > 0 && (
+            <Link to="/por-cobrar" className="tarjeta flex items-center justify-between gap-3 px-5 py-4 md:px-6">
+              <span>
+                <span className="block text-[16px]">{esCamiones ? 'Los dadores deben' : 'Les deben'}</span>
+                <span className="text-[14px] text-suave">
+                  {deudas.length} {deudas.length === 1 ? 'cobro pendiente' : 'cobros pendientes'}{esCamiones ? ' · desde Mis Cargas' : ''}
+                </span>
+              </span>
+              <span className="flex items-center gap-2"><Monto valor={deben} className="text-[18px] font-semibold" /><span className="text-acento">›</span></span>
+            </Link>
+          )}
           {tienePersonas && (
             <Link to="/sueldos" className="tarjeta block px-5 py-4 text-[16px] md:px-6">
               Sueldos de {AREA[area].nombre.toLowerCase() === 'casa' ? 'la casa' : 'el estudio'}: historial y aguinaldo

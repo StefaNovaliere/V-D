@@ -100,6 +100,7 @@ function FormGastoFijo({ fijo, inicial, onCerrar }) {
   const [frecuencia, setFrecuencia] = useState(base.frecuencia ?? 'mensual')
   const [vence, setVence] = useState(base.proximo_vencimiento ?? '')
   const [impositivo, setImpositivo] = useState(base.es_impositivo ?? false)
+  const [automatico, setAutomatico] = useState(base.automatico ?? false)
   const [activo, setActivo] = useState(base.activo ?? true)
   const [error, setError] = useState(null)
   const [guardando, setGuardando] = useState(false)
@@ -119,7 +120,7 @@ function FormGastoFijo({ fijo, inicial, onCerrar }) {
       await guardarGastoFijo({
         area, categoria_id: categoriaId, concepto, detalle, patente,
         monto: leerMonto(monto) ?? 0, frecuencia, proximo_vencimiento: vence,
-        es_impositivo: impositivo, activo,
+        es_impositivo: impositivo, automatico, activo,
       }, fijo?.id)
       avisar('Vencimiento guardado')
       onCerrar()
@@ -190,6 +191,17 @@ function FormGastoFijo({ fijo, inicial, onCerrar }) {
           <Interruptor activo={impositivo} onCambio={setImpositivo} etiqueta="Es un vencimiento impositivo" />
         </div>
       )}
+      <div className="rounded-xl border border-borde px-3.5 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[15px]">Que se cargue solo cuando vence</span>
+          <Interruptor activo={automatico} onCambio={setAutomatico} etiqueta="Que se cargue solo cuando vence" />
+        </div>
+        {automatico && (
+          <p className="mt-1.5 text-[13px] text-suave">
+            El día del vencimiento se carga el gasto por el monto de arriba. Si ese mes cambió, lo corrigen en Movimientos.
+          </p>
+        )}
+      </div>
       {fijo && !esSueldo && (
         <div className="flex items-center justify-between gap-3 rounded-xl border border-borde px-3.5 py-3">
           <span className="text-[15px]">Activo</span>

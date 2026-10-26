@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { db } from '../lib/db/index.js'
-import { controlMonotributo, rangoMonotributo, siguienteVencimiento } from '../lib/calculos.js'
+import { completarIpc, controlMonotributo, rangoMonotributo, siguienteVencimiento } from '../lib/calculos.js'
+import { prepararArchivo, TAMANO_MAXIMO } from '../lib/archivos.js'
+import { traerIpc } from '../lib/inflacion.js'
 import { hoy, mesActual, mesDe, primerDia, sumarMeses, ultimoDia } from '../lib/fechas.js'
 
 // Cada cuánto, como mínimo, se vuelve a consultar Mis Cargas solo al abrir la app.
@@ -24,6 +26,12 @@ export const useStore = create((set, get) => ({
   misCargas: null,
   sincronizando: false,
   monotributo: null,
+  // Plata por cobrar que todavía no entró.
+  porCobrar: [],
+  // Cantidad de comprobantes por movimiento, para el clip en las listas.
+  comprobantes: {},
+  // IPC completado hasta el mes actual (null si no se pudo conseguir).
+  inflacion: null,
 
   mes: mesActual(),
   // Movimientos del mes elegido y del anterior (para la comparación).
@@ -58,7 +66,7 @@ export const useStore = create((set, get) => ({
   async salir() {
     await db.salir()
     set({
-      estado: 'sin_sesion', usuario: null, hogar: null, miembros: [], movimientos: [],
+      estado: 'sin_sesion', usuario: null, hogar: null, miembros: [], movimientos: [], porCobrar: [], comprobantes: {},
       categorias: [], conceptos: [], personas: [], gastosFijos: [], configuracion: null,
       misCargas: null, monotributo: null,
     })
@@ -71,13 +79,21 @@ export const useStore = create((set, get) => ({
       set({ estado: 'sin_hogar' })
       return
     }
-    const [hogares, categorias, conceptos, personas, gastosFijos, configuraciones] = await Promise.all([
+    // Antes de leer: cargar los gastos fijos automáticos que ya vencieron,
+    // por si el cron diario todavía no corrió. Es idempotente.
+    try {
+      await db.rpc('cargar_fijos_vencidos')
+    } catch {
+      // Si falla, el cron lo hace a la mañana; la app abre igual.
+    }
+    const [hogares, categorias, conceptos, personas, gastosFijos, configuraciones, porCobrar] = await Promise.all([
       db.listar('households'),
       db.listar('categorias', { orden: 'orden' }),
       db.listar('conceptos_deducibles', { orden: 'orden' }),
       db.listar('personas', { orden: 'nombre' }),
       db.listar('gastos_fijos', { orden: 'proximo_vencimiento' }),
       db.listar('configuracion'),
+      db.listar('por_cobrar', { eq: { cobrado_el: null }, orden: 'created_at' }),
     ])
     set({
       miembros,
@@ -87,10 +103,12 @@ export const useStore = create((set, get) => ({
       personas,
       gastosFijos,
       configuracion: configuraciones[0] ?? null,
+      porCobrar,
     })
     await get().cargarMovimientos()
     set({ estado: 'listo' })
     get().cargarMonotributo()
+    get().cargarIpc()
     get().cargarEstadoMisCargas().then(() => get().sincronizarSiHaceFalta())
   },
 
@@ -109,6 +127,7 @@ export const useStore = create((set, get) => ({
       })
       // Si mientras tanto cambiaron de mes, esta respuesta ya no sirve.
       if (get().mes === mes) set({ movimientos })
+      get().cargarConteoComprobantes(movimientos.map((m) => m.id))
     } finally {
       set({ cargandoMovimientos: false })
     }
@@ -154,9 +173,11 @@ export const useStore = create((set, get) => ({
           monto: datos.monto,
           frecuencia: 'mensual',
           proximo_vencimiento: siguienteVencimiento(datos.fecha, 'mensual'),
+          automatico: Boolean(datos.automatico),
         })
         fila.gasto_fijo_id = fijo.id
         fila.origen = 'fijo'
+        fila.periodo = datos.fecha
         set({ gastosFijos: ordenarFijos([...get().gastosFijos, fijo]) })
       }
       guardado = await db.insertar('movimientos', fila)
@@ -166,6 +187,11 @@ export const useStore = create((set, get) => ({
   },
 
   async borrarMovimiento(id) {
+    // Los archivos de Storage no se borran solos con la fila: primero ellos.
+    if (!db.demo) {
+      const comps = await db.listar('comprobantes', { eq: { movimiento_id: id } })
+      await db.borrarArchivos(comps.map((c) => c.ruta)).catch(() => {})
+    }
     await db.borrar('movimientos', id)
     await get().despuesDeCambiarMovimientos()
   },
@@ -193,6 +219,7 @@ export const useStore = create((set, get) => ({
       frecuencia: datos.frecuencia,
       proximo_vencimiento: datos.proximo_vencimiento,
       es_impositivo: Boolean(datos.es_impositivo),
+      automatico: Boolean(datos.automatico),
       activo: datos.activo ?? true,
     }
     const guardado = id
@@ -226,6 +253,8 @@ export const useStore = create((set, get) => ({
       persona_id: fijo.persona_id,
       patente: fijo.patente,
       concepto_deducible_id: cat?.concepto_deducible_id ?? null,
+      // El vencimiento que cubre: la base no deja pagarlo dos veces.
+      periodo: fijo.proximo_vencimiento,
     })
     const actualizado = await db.actualizar('gastos_fijos', fijo.id, {
       proximo_vencimiento: siguienteVencimiento(fijo.proximo_vencimiento, fijo.frecuencia),
@@ -261,6 +290,7 @@ export const useStore = create((set, get) => ({
         detalle: persona.nombre,
         monto: persona.sueldo_mensual,
         proximo_vencimiento: datos.proximo_pago || fijo.proximo_vencimiento,
+        automatico: datos.sueldo_automatico ?? fijo.automatico,
         activo: persona.activa,
       }, fijo.id)
     } else if (cat && datos.proximo_pago) {
@@ -273,6 +303,7 @@ export const useStore = create((set, get) => ({
         monto: persona.sueldo_mensual,
         frecuencia: 'mensual',
         proximo_vencimiento: datos.proximo_pago,
+        automatico: Boolean(datos.sueldo_automatico),
         activo: persona.activa,
       })
       set({ gastosFijos: ordenarFijos([...get().gastosFijos, nuevo]) })
@@ -354,7 +385,7 @@ export const useStore = create((set, get) => ({
       const hasta = mesActual()
       const desde = sumarMeses(hasta, -(meses - 1))
       const r = await db.funcion('sincronizar-mis-cargas', { desde, hasta })
-      await get().cargarMovimientos()
+      await Promise.all([get().cargarMovimientos(), get().cargarPorCobrar()])
       if (!silencioso) get().avisar(`Listo: se actualizó lo de Mis Cargas (${r?.detalle ?? 'sin cambios'}).`)
     } catch (e) {
       if (!silencioso) get().avisar(e.message, 'error')
@@ -371,6 +402,112 @@ export const useStore = create((set, get) => ({
     if (Date.now() - ultima > SYNC_AUTOMATICA_MS) {
       await get().sincronizarMisCargas({ meses: 2, silencioso: true })
     }
+  },
+
+  // -------------------------------------------------------------------------
+  // Plata por cobrar
+  // -------------------------------------------------------------------------
+  async cargarPorCobrar() {
+    set({ porCobrar: await db.listar('por_cobrar', { eq: { cobrado_el: null }, orden: 'created_at' }) })
+  },
+
+  async guardarPorCobrar(datos, id = null) {
+    const fila = {
+      area: datos.area,
+      quien: datos.quien.trim(),
+      detalle: datos.detalle?.trim() || null,
+      monto: datos.monto,
+      fecha_estimada: datos.fecha_estimada || null,
+    }
+    const guardado = id ? await db.actualizar('por_cobrar', id, fila) : await db.insertar('por_cobrar', fila)
+    set({ porCobrar: [...get().porCobrar.filter((p) => p.id !== guardado.id), guardado] })
+  },
+
+  async borrarPorCobrar(id) {
+    await db.borrar('por_cobrar', id)
+    set({ porCobrar: get().porCobrar.filter((p) => p.id !== id) })
+  },
+
+  /** Cobrar: carga el ingreso y saca la deuda de la lista. */
+  async cobrar(item, { fecha, monto, categoria_id }) {
+    const mov = await db.insertar('movimientos', {
+      tipo: 'ingreso', area: item.area, categoria_id, monto, fecha,
+      nota: item.detalle ? `${item.quien} · ${item.detalle}` : item.quien,
+    })
+    await db.actualizar('por_cobrar', item.id, { cobrado_el: fecha, movimiento_id: mov.id })
+    set({ porCobrar: get().porCobrar.filter((p) => p.id !== item.id) })
+    await get().despuesDeCambiarMovimientos(fecha)
+  },
+
+  // -------------------------------------------------------------------------
+  // Comprobantes (fotos o PDF de un movimiento)
+  // -------------------------------------------------------------------------
+  async cargarConteoComprobantes(ids) {
+    if (!ids.length) return set({ comprobantes: {} })
+    try {
+      const filas = []
+      // De a 100 ids, para no armar una URL gigante.
+      for (let i = 0; i < ids.length; i += 100) {
+        filas.push(...await db.listar('comprobantes', { en: { movimiento_id: ids.slice(i, i + 100) } }))
+      }
+      const conteo = {}
+      for (const c of filas) conteo[c.movimiento_id] = (conteo[c.movimiento_id] ?? 0) + 1
+      set({ comprobantes: conteo })
+    } catch {
+      set({ comprobantes: {} })
+    }
+  },
+
+  async comprobantesDe(ids) {
+    const filas = []
+    for (let i = 0; i < ids.length; i += 100) {
+      filas.push(...await db.listar('comprobantes', { en: { movimiento_id: ids.slice(i, i + 100) } }))
+    }
+    return filas
+  },
+
+  async listarComprobantes(movimientoId) {
+    return db.listar('comprobantes', { eq: { movimiento_id: movimientoId }, orden: 'created_at' })
+  },
+
+  async subirComprobantes(movimientoId, archivos) {
+    const hogar = get().hogar?.id
+    for (const archivo of archivos) {
+      if (archivo.size > TAMANO_MAXIMO) throw new Error(`"${archivo.name}" pesa más de 10 MB.`)
+      const { blob, tipo, extension } = await prepararArchivo(archivo)
+      const ruta = `${hogar}/${movimientoId}/${crypto.randomUUID()}.${extension}`
+      await db.subirArchivo(ruta, blob, tipo)
+      try {
+        await db.insertar('comprobantes', { movimiento_id: movimientoId, ruta, tipo, tamano: blob.size })
+      } catch (e) {
+        // Que no quede un archivo huérfano en Storage.
+        await db.borrarArchivos([ruta]).catch(() => {})
+        throw e
+      }
+    }
+    const conteo = { ...get().comprobantes }
+    conteo[movimientoId] = (conteo[movimientoId] ?? 0) + archivos.length
+    set({ comprobantes: conteo })
+  },
+
+  async borrarComprobante(c) {
+    await db.borrar('comprobantes', c.id)
+    await db.borrarArchivos([c.ruta]).catch(() => {})
+    const conteo = { ...get().comprobantes }
+    conteo[c.movimiento_id] = Math.max(0, (conteo[c.movimiento_id] ?? 1) - 1)
+    set({ comprobantes: conteo })
+  },
+
+  urlComprobante(ruta) {
+    return db.urlArchivo(ruta)
+  },
+
+  // -------------------------------------------------------------------------
+  // Inflación
+  // -------------------------------------------------------------------------
+  async cargarIpc() {
+    const ipc = await traerIpc()
+    if (ipc) set({ inflacion: completarIpc(ipc, mesActual()) })
   },
 
   // -------------------------------------------------------------------------

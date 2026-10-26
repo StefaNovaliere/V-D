@@ -27,6 +27,7 @@ function FormPersona({ persona, onCerrar }) {
   const [alta, setAlta] = useState(persona?.fecha_alta ?? '')
   const [proximoPago, setProximoPago] = useState(fijo?.proximo_vencimiento ?? sumarMesesAFecha(hoy().slice(0, 8) + '01', 1))
   const [activa, setActiva] = useState(persona?.activa ?? true)
+  const [automatico, setAutomatico] = useState(fijo?.automatico ?? false)
   const [error, setError] = useState(null)
   const [guardando, setGuardando] = useState(false)
   const [confirmar, setConfirmar] = useState(false)
@@ -39,7 +40,7 @@ function FormPersona({ persona, onCerrar }) {
     try {
       await guardarPersona({
         area, nombre, rol, sueldo_mensual: leerMonto(sueldo) ?? 0,
-        fecha_alta: alta || null, proximo_pago: proximoPago || null, activa,
+        fecha_alta: alta || null, proximo_pago: proximoPago || null, activa, sueldo_automatico: automatico,
       }, persona?.id)
       avisar('Guardado')
       onCerrar()
@@ -78,6 +79,10 @@ function FormPersona({ persona, onCerrar }) {
         <Campo etiqueta="Fecha de ingreso">
           <input type="date" className="campo" value={alta} onChange={(e) => setAlta(e.target.value)} />
         </Campo>
+      </div>
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-borde px-3.5 py-3">
+        <span className="text-[15px]">El sueldo se carga solo el día de pago</span>
+        <Interruptor activo={automatico} onCambio={setAutomatico} etiqueta="El sueldo se carga solo el día de pago" />
       </div>
       {persona && (
         <div className="flex items-center justify-between rounded-xl border border-borde px-3.5 py-3">

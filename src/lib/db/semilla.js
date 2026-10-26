@@ -5,7 +5,7 @@
 //
 // Las categorías y conceptos repiten los de supabase/03_datos_iniciales.sql.
 
-import { armarFecha, hoy, mesActual, partes, sumarMeses } from '../fechas.js'
+import { armarFecha, hoy, mesActual, partes, sumarMeses, ultimoDia } from '../fechas.js'
 
 export const HOGAR = 'demo-hogar'
 export const LAURA = 'demo-laura'
@@ -60,6 +60,12 @@ export const PATENTES_DEMO = [
   { patente: 'AC 930 LM', base: 740000, viajes: 6 },
 ]
 
+// Lo que "deben" los dadores en la demo (viajes sin liquidar en Mis Cargas).
+export const DADORES_DEMO = [
+  { dador: 'Cargill', monto: 1450000, viajes: 3 },
+  { dador: 'ADM Agro', monto: 820000, viajes: 2 },
+]
+
 export function saldoDemoMisCargas(mes, i) {
   const actual = mesActual()
   const p = PATENTES_DEMO[i]
@@ -91,12 +97,16 @@ export function crearSemilla() {
     personas: [],
     gastos_fijos: [],
     movimientos: [],
+    por_cobrar: [],
+    comprobantes: [],
+    push_suscripciones: [],
     configuracion: [{
       household_id: HOGAR,
       monotributo_activo: true,
       monotributo_categoria: 'H',
       monotributo_tope: 45000000,
       monotributo_aviso_pct: 90,
+      aviso_dias: 2,
     }],
   }
 
@@ -140,11 +150,12 @@ export function crearSemilla() {
   // Gastos fijos con vencimiento
   const gf = (o) => ({
     id: nuevoId(), household_id: HOGAR, tipo: 'gasto', detalle: null, patente: null, persona_id: null,
-    frecuencia: 'mensual', es_impositivo: false, activo: true, ...o,
+    frecuencia: 'mensual', es_impositivo: false, activo: true, automatico: false, ...o,
   })
   const fijoSecretaria = gf({
     area: 'estudio', categoria_id: cat('estudio', 'gasto', 'sueldo').id, concepto: 'Sueldo secretaria',
     detalle: 'Graciela', persona_id: graciela.id, monto: 650000, proximo_vencimiento: `${siguiente}-23`,
+    automatico: true,
   })
   const fijoNinera = gf({
     area: 'casa', categoria_id: cat('casa', 'gasto', 'sueldo').id, concepto: 'Sueldo niñera',
@@ -152,7 +163,7 @@ export function crearSemilla() {
   })
   const fijoSeguro = gf({
     area: 'camiones', categoria_id: cat('camiones', 'gasto', 'seguro').id, concepto: 'Seguro de los camiones',
-    detalle: '3 camiones', monto: 540000, proximo_vencimiento: `${siguiente}-05`,
+    detalle: '3 camiones', monto: 540000, proximo_vencimiento: `${siguiente}-05`, automatico: true,
   })
   const fijoIibb = gf({
     area: 'camiones', categoria_id: cat('camiones', 'gasto', 'iibb').id, concepto: 'Ingresos Brutos',
@@ -183,6 +194,8 @@ export function crearSemilla() {
     id: nuevoId(), household_id: HOGAR, nota: null, origen: 'manual', creado_por: LAURA,
     persona_id: null, gasto_fijo_id: null, patente: null, concepto_deducible_id: null, ref_externa: null,
     created_at: ahora, updated_at: ahora, ...o,
+    // Los pagos de gastos fijos registran qué vencimiento cubren.
+    periodo: o.periodo ?? (o.gasto_fijo_id ? o.fecha : null),
     tipo: o.categoria.tipo, area: o.categoria.area, categoria_id: o.categoria.id, categoria: undefined,
   })
 
@@ -265,6 +278,22 @@ export function crearSemilla() {
   }
 
   tablas.movimientos = movs
+
+  // Plata por cobrar: honorarios ya trabajados y lo que deben los dadores.
+  const pc = (o) => ({
+    id: nuevoId(), household_id: HOGAR, detalle: null, fecha_estimada: null, origen: 'manual',
+    ref_externa: null, movimiento_id: null, cobrado_el: null, created_at: ahora, ...o,
+  })
+  tablas.por_cobrar = [
+    pc({ area: 'estudio', quien: 'Laboral Gómez', detalle: 'Segunda cuota del acuerdo', monto: 1100000,
+      fecha_estimada: ultimoDia(mes) }),
+    pc({ area: 'estudio', quien: 'Divorcio Pérez', detalle: 'Honorarios regulados', monto: 650000,
+      fecha_estimada: `${siguiente}-15` }),
+    ...DADORES_DEMO.map((d) => pc({
+      area: 'camiones', quien: d.dador, detalle: `${d.viajes} viajes sin liquidar`, monto: d.monto,
+      origen: 'mis_cargas', ref_externa: `mis_cargas:dador:${d.dador}`,
+    })),
+  ]
   return tablas
 }
 
